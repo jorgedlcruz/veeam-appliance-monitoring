@@ -71,13 +71,7 @@ Tags always include `instance`, `serverName`, `version`.
    nano "$HOME/bin/veeam_appliance.sh"
    chmod +x "$HOME/bin/veeam_appliance.sh"
    ```
-
-   Paste the script body you have working. Replace the `VERSION` line with:
-
-   ```bash
-   VERSION="${version:-$( { veeamtransport -v 2>/dev/null || uname -r; } | head -n1 | tr -d '\r' )}"
-   ```
-
+   
 2. Create an environment file for secrets.
 
    ```bash
