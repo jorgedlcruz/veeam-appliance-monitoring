@@ -68,10 +68,10 @@ Tags always include `instance`, `serverName`, `version`.
 
    ```bash
    mkdir -p "$HOME/bin" "$HOME/logs"
-   nano "$HOME/bin/veeam_appliance.sh"
+   vi "$HOME/bin/veeam_appliance.sh"
    chmod +x "$HOME/bin/veeam_appliance.sh"
    ```
-   
+
 2. Create an environment file for secrets.
 
    ```bash
