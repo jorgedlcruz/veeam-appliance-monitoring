@@ -56,9 +56,11 @@ tag_ver="version=$(escape "$VERSION")"
 
 CLK_TCK="$(getconf CLK_TCK 2>/dev/null || echo 100)"
 
-HEALTH_URL="${INFLUX_PROTO}://${INFLUX_HOST}:${INFLUX_PORT}/health"
 CURL_COMMON=(-sS --max-time 10 --retry 2 --retry-delay 1)
 [ "$CURL_INSECURE" = "true" ] && CURL_COMMON+=(-k)
+
+WRITE_URL="${INFLUX_PROTO}://${INFLUX_HOST}:${INFLUX_PORT}/api/v2/write?org=$(printf %s "$INFLUX_ORG" | sed 's/ /%20/g')&bucket=$(printf %s "$INFLUX_BUCKET" | sed 's/ /%20/g')&precision=ns"
+HEALTH_URL="${INFLUX_PROTO}://${INFLUX_HOST}:${INFLUX_PORT}/health"
 
 post_block() {
   local name="$1"
@@ -80,7 +82,6 @@ post_block() {
     return 0
   fi
 
-  # Capture HTTP status
   local http_code
   http_code=$(printf "%s" "$payload" \
     | curl "${CURL_COMMON[@]}" -w "%{http_code}" -o /dev/null \
@@ -88,10 +89,11 @@ post_block() {
         -H "Authorization: Token ${INFLUX_TOKEN}" \
         -H "Content-Type: text/plain; charset=utf-8" \
         --data-binary @-)
+
+  if [ "$http_code" = "204" ]; then
     log "$name: write OK (HTTP 204)"
   else
     err "$name: write failed (HTTP $http_code)"
-    # Optional: print first 5 lines to aid debugging
     printf "%s" "$payload" | head -n 5 | sed 's/^/[PAYLOAD_HEAD] /' >&2
     return 1
   fi
@@ -99,21 +101,13 @@ post_block() {
 
 check_influx() {
   log "Checking InfluxDB health at $HEALTH_URL"
-  local code body
-  body=$(curl "${CURL_COMMON[@]}" -w "%{http_code}" -o /tmp/influx_health.$$ "$HEALTH_URL" || true)
-  code="$body"
+  local code
+  code=$(curl "${CURL_COMMON[@]}" -o /dev/null -w "%{http_code}" "$HEALTH_URL" || true)
   if [ "$code" = "200" ]; then
     log "InfluxDB health OK"
-    rm -f /tmp/influx_health.$$
-    return 0
+  else
+    warn "InfluxDB health check returned HTTP $code (continuing)"
   fi
-  warn "InfluxDB health check returned HTTP $code"
-  if [ -s /tmp/influx_health.$$ ]; then
-    sed 's/^/[HEALTH] /' /tmp/influx_health.$$ >&2
-  fi
-  rm -f /tmp/influx_health.$$
-  # Do not hard fail, sometimes /health may be disabled behind proxies
-  return 0
 }
 
 ########################################
@@ -138,6 +132,11 @@ while read -r cpu user nice system idle iowait irq softirq steal guest gnice _; 
   [[ "$cpu" =~ ^cpu[0-9]+$ ]] || continue
   cpu_tag="cpu=$(escape "$cpu")"
   conv() { awk -v v="$1" -v hz="$CLK_TCK" 'BEGIN{printf "%.6f", v/hz}'; }
+  declare -A m=(
+    [user]="$user" [nice]="$nice" [system]="$system" [idle]="$idle"
+    [iowait]="$iowait" [irq]="$irq" [softirq]="$softirq" [steal]="$steal"
+    [guest]="$guest" [guest_nice]="$gnice"
+  )
   for mode in "${!m[@]}"; do
     val="$(conv "${m[$mode]}")"
     LP_CPU+="node_cpu_seconds_total,${tag_inst},${tag_srv},${tag_ver},${cpu_tag},mode=${mode} value=${val} ${TS}"$'\n'
