@@ -66,6 +66,20 @@
   "links": [],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 19,
+      "panels": [],
+      "repeat": "backupserver",
+      "title": "$backupserver",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "influxdb",
         "uid": "${DS_INFLUXDB}"
@@ -110,7 +124,7 @@
         "h": 3,
         "w": 3,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -143,6 +157,14 @@
         }
       ],
       "title": "Uptime",
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": []
+          }
+        }
+      ],
       "type": "stat"
     },
     {
@@ -291,7 +313,7 @@
         "h": 6,
         "w": 21,
         "x": 3,
-        "y": 0
+        "y": 1
       },
       "id": 17,
       "options": {
@@ -435,7 +457,7 @@
         "h": 3,
         "w": 3,
         "x": 0,
-        "y": 3
+        "y": 4
       },
       "id": 5,
       "options": {
@@ -565,7 +587,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 6
+        "y": 7
       },
       "id": 1,
       "interval": "$inter",
@@ -689,7 +711,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 6
+        "y": 7
       },
       "id": 2,
       "interval": "$inter",
@@ -807,7 +829,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 14
       },
       "id": 10,
       "interval": "$inter",
@@ -951,7 +973,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 20
+        "y": 21
       },
       "id": 11,
       "interval": "$inter",
@@ -1033,7 +1055,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 20
+        "y": 21
       },
       "id": 18,
       "options": {
@@ -1076,6 +1098,7 @@
       "type": "bargauge"
     }
   ],
+  "refresh": "",
   "schemaVersion": 41,
   "tags": [],
   "templating": {
@@ -1165,13 +1188,13 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "Grafana Dashboard for Veeam Software Appliance",
   "uid": "b09e0d44-887e-408d-81dc-dc018461abcf",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }
