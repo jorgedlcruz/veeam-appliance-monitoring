@@ -3,6 +3,18 @@
 # No sudo. No extra packages.
 
 set -euo pipefail
+set -a
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/../.veeam_influx.env"
+
+if [ -f "$ENV_FILE" ]; then
+  . "$ENV_FILE"
+  [ "${DEBUG:-true}" = "true" ] && echo "[INFO] Loaded env from $ENV_FILE"
+else
+  echo "[ERROR] Env file not found at $ENV_FILE" >&2
+  exit 1
+fi
+set +a
 
 # Influx v2 target
 INFLUX_PROTO="${INFLUX_PROTO:-https}"             # http or https
