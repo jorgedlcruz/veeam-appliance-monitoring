@@ -31,27 +31,51 @@ DRY_RUN="${DRY_RUN:-false}"
 INSTANCE="${INSTANCE:-$(hostname -f 2>/dev/null || hostname -s)}"
 SERVER_NAME="${veeamBackupServer:-$(hostname -s)}"
 # Version
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/veeam/transport"
-
-VEAEMTRANSPORT_BIN="${VEAEMTRANSPORT_BIN:-/opt/veeam/transport/veeamtransport}"
-
+HOSTMGR_BASE="${HOSTMGR_BASE:-http://127.0.0.1:10206}"
+http_get() {
+  curl -sS --max-time 5 "$1" || return $?
+}
 get_version() {
-  if [ -n "${version:-}" ]; then
-    printf "%s" "$version"
+  # 1) Try /version which returns a JSON string like "13.0.0.402"
+  body="$(http_get "${HOSTMGR_BASE}/version" || true)"
+  v="$(printf "%s" "$body" | sed -n 's/^[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p')"
+  if [ -n "$v" ]; then
+    printf "%s" "$v"
     return
   fi
 
+  # 2) Fallback to /v1/server/info -> productVersion field
+  body="$(http_get "${HOSTMGR_BASE}/v1/server/info" || true)"
+  v="$(printf "%s" "$body" | sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [ -n "$v" ]; then
+    printf "%s" "$v"
+    return
+  fi
+
+  # 3) Last resort: veeamtransport -v or kernel as you had
   for cand in "$VEAEMTRANSPORT_BIN" "$(command -v veeamtransport 2>/dev/null)"; do
     if [ -n "$cand" ] && [ -x "$cand" ]; then
       v="$("$cand" -v 2>/dev/null | head -n1 | tr -d '\r')"
       [ -n "$v" ] && { printf "%s" "$v"; return; }
     fi
   done
-
   uname -r
 }
 
 VERSION="$(get_version)"
+
+# Appliance TYPE tag from API, for example VBR, etc
+get_type() {
+  body="$(http_get "${HOSTMGR_BASE}/v1/server/info" || true)"
+  t="$(printf "%s" "$body" | sed -n 's/.*"applianceType"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [ -n "$t" ]; then
+    printf "%s" "$t"
+  else
+    printf "%s" "Unknown"
+  fi
+}
+
+TYPE="${TYPE:-$(get_type)}"
 
 ########################################
 # Helpers
@@ -65,6 +89,8 @@ ts_ns() { date +%s%N; }
 tag_inst="instance=$(escape "$INSTANCE")"
 tag_srv="serverName=$(escape "$SERVER_NAME")"
 tag_ver="version=$(escape "$VERSION")"
+tag_type="type=$(escape "$TYPE")"
+BASE_TAGS="${tag_inst},${tag_srv},${tag_ver},${tag_type}"
 
 CLK_TCK="$(getconf CLK_TCK 2>/dev/null || echo 100)"
 
@@ -134,8 +160,8 @@ now_s=$(date +%s)
 uptime_s=$(awk '{print int($1)}' /proc/uptime)
 boot_s=$((now_s - uptime_s))
 LP_TIME=""
-LP_TIME+="node_time_seconds,${tag_inst},${tag_srv},${tag_ver} value=${now_s} ${TS}"$'\n'
-LP_TIME+="node_boot_time_seconds,${tag_inst},${tag_srv},${tag_ver} value=${boot_s} ${TS}"$'\n'
+LP_TIME+="node_time_seconds,${BASE_TAGS} value=${now_s} ${TS}"$'\n'
+LP_TIME+="node_boot_time_seconds,${BASE_TAGS} value=${boot_s} ${TS}"$'\n'
 post_block "time" "$LP_TIME"
 
 # 2) CPU seconds per CPU and total
@@ -151,7 +177,7 @@ while read -r cpu user nice system idle iowait irq softirq steal guest gnice _; 
   )
   for mode in "${!m[@]}"; do
     val="$(conv "${m[$mode]}")"
-    LP_CPU+="node_cpu_seconds_total,${tag_inst},${tag_srv},${tag_ver},${cpu_tag},mode=${mode} value=${val} ${TS}"$'\n'
+    LP_CPU+="node_cpu_seconds_total,${BASE_TAGS},${cpu_tag},mode=${mode} value=${val} ${TS}"$'\n'
   done
 done < <(grep -E '^cpu[0-9]+' /proc/stat)
 
@@ -159,16 +185,16 @@ read -r _ u n s i o irq sirq st g gn _ < <(grep -E '^cpu ' /proc/stat)
 declare -A mt=([user]="$u" [nice]="$n" [system]="$s" [idle]="$i" [iowait]="$o" [irq]="$irq" [softirq]="$sirq" [steal]="$st" [guest]="$g" [guest_nice]="$gn")
 for mode in "${!mt[@]}"; do
   val=$(awk -v v="${mt[$mode]}" -v hz="$CLK_TCK" 'BEGIN{printf "%.6f", v/hz}')
-  LP_CPU+="node_cpu_seconds_total,${tag_inst},${tag_srv},${tag_ver},cpu=all,mode=${mode} value=${val} ${TS}"$'\n'
+  LP_CPU+="node_cpu_seconds_total,${BASE_TAGS},cpu=all,mode=${mode} value=${val} ${TS}"$'\n'
 done
 post_block "cpu" "$LP_CPU"
 
 # 3) Load averages
 read -r load1 load5 load15 _ < /proc/loadavg
 LP_LOAD=""
-LP_LOAD+="node_load1,${tag_inst},${tag_srv},${tag_ver} value=${load1} ${TS}"$'\n'
-LP_LOAD+="node_load5,${tag_inst},${tag_srv},${tag_ver} value=${load5} ${TS}"$'\n'
-LP_LOAD+="node_load15,${tag_inst},${tag_srv},${tag_ver} value=${load15} ${TS}"$'\n'
+LP_LOAD+="node_load1,${BASE_TAGS} value=${load1} ${TS}"$'\n'
+LP_LOAD+="node_load5,${BASE_TAGS} value=${load5} ${TS}"$'\n'
+LP_LOAD+="node_load15,${BASE_TAGS} value=${load15} ${TS}"$'\n'
 post_block "load" "$LP_LOAD"
 
 # 4) Memory gauges
@@ -185,7 +211,7 @@ declare -A memv=(
 )
 LP_MEM=""
 for k in "${!memv[@]}"; do
-  LP_MEM+="node_memory_${k}_bytes,${tag_inst},${tag_srv},${tag_ver} value=${memv[$k]} ${TS}"$'\n'
+  LP_MEM+="node_memory_${k}_bytes,${BASE_TAGS} value=${memv[$k]} ${TS}"$'\n'
 done
 post_block "memory" "$LP_MEM"
 
@@ -197,7 +223,7 @@ while read -r fs fstype total used avail pcent mount; do
   tdev="device=$(escape "$fs")"
   ttype="fstype=$(escape "$fstype")"
   tmount="mountpoint=$(escape "$mount")"
-  tags="${tag_inst},${tag_srv},${tag_ver},${tdev},${ttype},${tmount}"
+  tags="${BASE_TAGS},${tdev},${ttype},${tmount}"
   LP_FS+="node_filesystem_size_bytes,${tags} value=${total_b} ${TS}"$'\n'
   LP_FS+="node_filesystem_free_bytes,${tags} value=${free_b} ${TS}"$'\n'
   LP_FS+="node_filesystem_avail_bytes,${tags} value=${avail_b} ${TS}"$'\n'
@@ -210,7 +236,7 @@ while read -r major minor dev rd_c rd_m rd_sec rd_ms wr_c wr_m wr_sec wr_ms io_n
   [[ "$dev" =~ ^(loop|ram) ]] && continue
   [[ "$dev" =~ ^(sd|vd|nvme|dm-) ]] || continue
   tdev="device=$(escape "$dev")"
-  tags="${tag_inst},${tag_srv},${tag_ver},${tdev}"
+  tags="${BASE_TAGS},${tdev}"
   rb=$((rd_sec*512))
   wb=$((wr_sec*512))
   LP_DISK+="node_disk_reads_completed_total,${tags} value=${rd_c} ${TS}"$'\n'
@@ -241,7 +267,7 @@ for d in /sys/class/net/*; do
   tx_e=$(cat "$d/statistics/tx_errors" 2>/dev/null || echo 0)
   tx_d=$(cat "$d/statistics/tx_dropped" 2>/dev/null || echo 0)
   tif="interface=$(escape "$iface")"
-  tags="${tag_inst},${tag_srv},${tag_ver},${tif}"
+  tags="${BASE_TAGS},${tif}"
   LP_NET+="node_network_receive_bytes_total,${tags} value=${rx_b} ${TS}"$'\n'
   LP_NET+="node_network_transmit_bytes_total,${tags} value=${tx_b} ${TS}"$'\n'
   LP_NET+="node_network_receive_packets_total,${tags} value=${rx_p} ${TS}"$'\n'
@@ -266,7 +292,7 @@ for tz in /sys/class/thermal/thermal_zone*; do
     val=$(awk -v v="$temp" 'BEGIN{printf "%.3f", v+0.0}')
   fi
   tsens="sensor=$(escape "$type")"
-  LP_TEMP+="node_thermal_zone_temp_celsius,${tag_inst},${tag_srv},${tag_ver},${tsens} value=${val} ${TS}"$'\n'
+  LP_TEMP+="node_thermal_zone_temp_celsius,${BASE_TAGS},${tsens} value=${val} ${TS}"$'\n'
 done
 post_block "temperatures" "$LP_TEMP"
 
