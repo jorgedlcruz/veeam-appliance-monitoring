@@ -36,15 +36,6 @@ http_get() {
   curl -sS --max-time 5 "$1" || return $?
 }
 get_version() {
-  # 1) Try /version which returns a JSON string like "13.0.0.402"
-  body="$(http_get "${HOSTMGR_BASE}/version" || true)"
-  v="$(printf "%s" "$body" | sed -n 's/^[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p')"
-  if [ -n "$v" ]; then
-    printf "%s" "$v"
-    return
-  fi
-
-  # 2) Fallback to /v1/server/info -> productVersion field
   body="$(http_get "${HOSTMGR_BASE}/v1/server/info" || true)"
   v="$(printf "%s" "$body" | sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   if [ -n "$v" ]; then
@@ -52,14 +43,6 @@ get_version() {
     return
   fi
 
-  # 3) Last resort: veeamtransport -v or kernel as you had
-  for cand in "$VEAEMTRANSPORT_BIN" "$(command -v veeamtransport 2>/dev/null)"; do
-    if [ -n "$cand" ] && [ -x "$cand" ]; then
-      v="$("$cand" -v 2>/dev/null | head -n1 | tr -d '\r')"
-      [ -n "$v" ] && { printf "%s" "$v"; return; }
-    fi
-  done
-  uname -r
 }
 
 VERSION="$(get_version)"
